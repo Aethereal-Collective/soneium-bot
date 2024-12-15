@@ -2,7 +2,7 @@
 console.clear(); // Clear console
 console.log('\x1b[36m%s\x1b[0m', `
 ╔═══════════════════════════════════════╗
-║        Soneium Multi-Tool v1.0        ║
+║        Soneium Multi-Tool v1.4        ║
 ║         By: Aethereal Team            ║
 ╚═══════════════════════════════════════╝
 `);
