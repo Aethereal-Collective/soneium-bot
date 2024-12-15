@@ -236,6 +236,13 @@ try {
             "econnrefused",
             "network error",
             
+            // Tambahkan error socket hang up
+            "socket hang up",
+            "socket hang",
+            "hang up",
+            "socket closed",
+            "socket error",
+            
             // HTTP Status Errors
             "503",
             "502",
@@ -711,6 +718,7 @@ try {
 
     // Swap Functions
     async function swapETHtoToken(wallet, tokenAddress, amountIn) {
+        return await withRetry(async () => {
         try {
             const ethBalance = await wallet.provider.getBalance(wallet.address);
             
@@ -762,59 +770,62 @@ try {
             return true;
         } catch (error) {
             console.error(formatLog(wallet, `❌ Error swapping ETH to token: ${error.message}`, 'error'));
-            return false;
+            throw error;
         }
+        }, wallet, 3, 10000);
     }
 
     async function swapTokensForETH(wallet, tokenAddress, amountIn, decimals = 18) {
-        try {
-            const approved = await approveToken(wallet, tokenAddress, ROUTER_ADDRESS);
-            if (!approved) return false;
+        return await withRetry(async () => {
+            try {
+                const approved = await approveToken(wallet, tokenAddress, ROUTER_ADDRESS);
+                if (!approved) return false;
 
-            const iface = new ethers.Interface([
-                "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) external returns (uint256[] memory amounts)"
-            ]);
+                const iface = new ethers.Interface([
+                    "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) external returns (uint256[] memory amounts)"
+                ]);
 
-            const path = [tokenAddress, WETH_ADDRESS];
-            const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+                const path = [tokenAddress, WETH_ADDRESS];
+                const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
 
-            const data = iface.encodeFunctionData("swapExactTokensForETH", [
-                amountIn, 0, path, wallet.address, deadline
-            ]);
+                const data = iface.encodeFunctionData("swapExactTokensForETH", [
+                    amountIn, 0, path, wallet.address, deadline
+                ]);
 
-            let gasLimit;
-            for (let i = 0; i < 3; i++) {
-                try {
-                    gasLimit = await wallet.provider.estimateGas({
-                        to: ROUTER_ADDRESS,
-                        data: data,
-                        from: wallet.address
-                    });
-                    break;
-                } catch (error) {
-                    if (i === 2) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                let gasLimit;
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        gasLimit = await wallet.provider.estimateGas({
+                            to: ROUTER_ADDRESS,
+                            data: data,
+                            from: wallet.address
+                        });
+                        break;
+                    } catch (error) {
+                        if (i === 2) throw error;
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                    }
                 }
+
+                const tokenSymbol = tokenAddress === SONE_ADDRESS ? "SONE" : 
+                                   tokenAddress === SOE_ADDRESS ? "SOE" : "USDC.e";
+
+                console.log(formatLog(wallet, `\n🎉 Swapping ${ethers.formatUnits(amountIn, decimals)} ${tokenSymbol} to ETH...`, 'info'));
+                const transaction = await wallet.sendTransaction({
+                    to: ROUTER_ADDRESS,
+                    data: data,
+                    gasLimit: gasLimit
+                });
+
+                console.log(formatLog(wallet, `✅ Transaction Hash: ${NETWORKS.SONEIUM.EXPLORER}${transaction.hash}`, 'wait'));
+                await transaction.wait();
+                console.log(formatLog(wallet, `🎉 Swap ${tokenSymbol} to ETH successful!`, 'success'));
+                return true;
+            } catch (error) {
+                console.error(formatLog(wallet, `❌ Error swapping tokens to ETH: ${error.message}`, 'error'));
+                throw error; // Throw error agar withRetry bisa menangani retry
             }
-
-            const tokenSymbol = tokenAddress === SONE_ADDRESS ? "SONE" : 
-                               tokenAddress === SOE_ADDRESS ? "SOE" : "USDC.e";
-
-            console.log(formatLog(wallet, `\n🎉 Swapping ${ethers.formatUnits(amountIn, decimals)} ${tokenSymbol} to ETH...`, 'info'));
-            const transaction = await wallet.sendTransaction({
-                to: ROUTER_ADDRESS,
-                data: data,
-                gasLimit: gasLimit
-            });
-
-            console.log(formatLog(wallet, `✅ Transaction Hash: ${NETWORKS.SONEIUM.EXPLORER}${transaction.hash}`, 'wait'));
-            await transaction.wait();
-            console.log(formatLog(wallet, `🎉 Swap ${tokenSymbol} to ETH successful!`, 'success'));
-            return true;
-        } catch (error) {
-            console.error(formatLog(wallet, `❌ Error swapping tokens to ETH: ${error.message}`, 'error'));
-            return false;
-        }
+        }, wallet, 3, 10000);
     }
 
     // Tambahkan konstanta untuk delay
@@ -856,14 +867,15 @@ try {
     }
 
     async function processWallet(wallet, action, index) {
-        try {
-            if (action === "swap") {
-                console.log(formatLog(wallet, `\n🎉 Starting swap bot for Wallet ${index + 1}: ${wallet.address}`, 'info'));
+        return await withRetry(async () => {
+            try {
+                if (action === "swap") {
+                    console.log(formatLog(wallet, `\n🎉 Memulai swap untuk Wallet ${index + 1}: ${wallet.address}`, 'info'));
 
                 // Tambahkan delay awal
-                await customDelay(wallet, 'Waiting before starting swap process...');
+                await customDelay(wallet, '⏳ Menunggu sebelum memulai proses swap...');
 
-                // Setup token contracts
+                // Setup kontrak token
                 const usdcContract = new ethers.Contract(
                     USDC_ADDRESS,
                     ["function balanceOf(address) view returns (uint256)"],
@@ -882,113 +894,101 @@ try {
                     wallet
                 );
 
-                while (true) {
-                    try {
-                        console.log(formatLog(wallet, `\n🎉=== Starting New Swap Cycle for Wallet ${index + 1} ===`, 'info'));
-                        
-                        // Tambahkan delay sebelum memulai cycle baru
-                        await customDelay(wallet, 'Waiting before starting new swap cycle...');
-
-                        // Generate random sequence of 5 transactions
-                        let transactions = [];
-                        for (let i = 0; i < 5; i++) {
-                            const randomType = Math.floor(Math.random() * 6);
-                            switch (randomType) {
-                                case 0: transactions.push({ from: 'ETH', to: 'SONE' }); break;
-                                case 1: transactions.push({ from: 'ETH', to: 'SOE' }); break;
-                                case 2: transactions.push({ from: 'ETH', to: 'USDC' }); break;
-                                case 3: transactions.push({ from: 'SONE', to: 'ETH' }); break;
-                                case 4: transactions.push({ from: 'SOE', to: 'ETH' }); break;
-                                case 5: transactions.push({ from: 'USDC', to: 'ETH' }); break;
-                            }
-                        }
-
-                        console.log(formatLog(wallet, "\n📋 Planned transactions for this cycle:", 'info'));
-                        transactions.forEach((tx, index) => {
-                            console.log(formatLog(wallet, `${index + 1}. 💱 ${tx.from} → ${tx.to}`, 'info'));
-                        });
-
-                        // Execute each transaction
-                        for (let i = 0; i < transactions.length; i++) {
-                            // Check balances
-                            const ethBalance = await wallet.provider.getBalance(wallet.address);
-                            const usdcBalance = await usdcContract.balanceOf(wallet.address);
-                            const soneBalance = await soneContract.balanceOf(wallet.address);
-                            const soeBalance = await soeContract.balanceOf(wallet.address);
+                console.log(formatLog(wallet, `\n🎉=== Memulai Swap Cycle untuk Wallet ${index + 1} ===`, 'info'));
                             
-                            console.log(formatLog(wallet, `\nTransaction ${i + 1} of 5`, 'info'));
-                            console.log(formatLog(wallet, `💰 Current Balances:`, 'info'));
-                            console.log(formatLog(wallet, `⚡ ETH: ${ethers.formatEther(ethBalance)} ETH`, 'info'));
-                            console.log(formatLog(wallet, `💵 USDC.e: ${ethers.formatUnits(usdcBalance, 6)} USDC.e`, 'info'));
-                            console.log(formatLog(wallet, `🪙 SONE: ${ethers.formatEther(soneBalance)} SONE`, 'info'));
-                            console.log(formatLog(wallet, `⭐ SOE: ${ethers.formatEther(soeBalance)} SOE`, 'info'));
+                // Tambahkan delay sebelum swap cycle
+                await customDelay(wallet, '⏳ Menunggu sebelum memulai swap cycle...');
 
-                            const tx = transactions[i];
-                            const percentage = Math.floor(Math.random() * (5 - 1 + 1)) + 1; // 1-5%
-
-                            if (tx.from === 'ETH') {
-                                const amountIn = (ethBalance * BigInt(percentage)) / 100n;
-                                switch (tx.to) {
-                                    case 'SONE':
-                                        await swapETHtoToken(wallet, SONE_ADDRESS, amountIn);
-                    break;
-                                    case 'SOE':
-                                        await swapETHtoToken(wallet, SOE_ADDRESS, amountIn);
-                    break;
-                                    case 'USDC':
-                                        await swapETHtoToken(wallet, USDC_ADDRESS, amountIn);
-                                        break;
-                                }
-                            } else {
-                                // Handle token to ETH swaps
-                                switch (tx.from) {
-                                    case 'SONE':
-                                        if (soneBalance > 0n) {
-                                            await swapTokensForETH(wallet, SONE_ADDRESS, soneBalance);
-                                        } else {
-                                            console.log(formatLog(wallet, `❌ No SONE balance, swapping ETH to SONE instead...`, 'warning'));
-                                            const amountIn = (ethBalance * BigInt(percentage)) / 100n;
-                                            await swapETHtoToken(wallet, SONE_ADDRESS, amountIn);
-                                        }
-                                        break;
-                                    case 'SOE':
-                                        if (soeBalance > 0n) {
-                                            await swapTokensForETH(wallet, SOE_ADDRESS, soeBalance);
-                                        } else {
-                                            console.log(formatLog(wallet, `❌ No SOE balance, swapping ETH to SOE instead...`, 'warning'));
-                                            const amountIn = (ethBalance * BigInt(percentage)) / 100n;
-                                            await swapETHtoToken(wallet, SOE_ADDRESS, amountIn);
-                                        }
-                                        break;
-                                    case 'USDC':
-                                        if (usdcBalance > 0n) {
-                                            await swapTokensForETH(wallet, USDC_ADDRESS, usdcBalance, 6);
-                                        } else {
-                                            console.log(formatLog(wallet, `❌ No USDC.e balance, swapping ETH to USDC.e instead...`, 'warning'));
-                                            const amountIn = (ethBalance * BigInt(percentage)) / 100n;
-                                            await swapETHtoToken(wallet, USDC_ADDRESS, amountIn);
-                                        }
-                                        break;
-                                }
-                            }
-
-                            // Random delay between transactions (5-15 seconds)
-                            if (i < transactions.length - 1) {
-                                await customDelay(wallet, 'Waiting before next transaction...');
-                            }
-                        }
-
-                        // Random delay between cycles (5760-17280 seconds / 96-288 minutes)
-                        const cycleDelay = Helper.random(CYCLE_DELAY_RANGE.MIN, CYCLE_DELAY_RANGE.MAX);
-                        const minutes = Math.floor(cycleDelay / 60000);
-                        console.log(formatLog(wallet, `\n🏁 Cycle completed! Waiting ${minutes} minutes before next cycle...`, 'wait'));
-                        await new Promise(resolve => setTimeout(resolve, cycleDelay));
-
-                    } catch (error) {
-                        console.error(formatLog(wallet, `❌ Error in swap cycle: ${error.message}`, 'error'));
-                        await customDelay(wallet, 'Waiting before next cycle...');
+                // Generate urutan transaksi acak
+                let transactions = [];
+                for (let i = 0; i < 5; i++) {
+                    const randomType = Math.floor(Math.random() * 6);
+                    switch (randomType) {
+                        case 0: transactions.push({ from: 'ETH', to: 'SONE' }); break;
+                        case 1: transactions.push({ from: 'ETH', to: 'SOE' }); break;
+                        case 2: transactions.push({ from: 'ETH', to: 'USDC' }); break;
+                        case 3: transactions.push({ from: 'SONE', to: 'ETH' }); break;
+                        case 4: transactions.push({ from: 'SOE', to: 'ETH' }); break;
+                        case 5: transactions.push({ from: 'USDC', to: 'ETH' }); break;
                     }
                 }
+
+                console.log(formatLog(wallet, "\n📋 Transaksi yang direncanakan untuk cycle ini:", 'info'));
+                transactions.forEach((tx, index) => {
+                    console.log(formatLog(wallet, `${index + 1}. 💱 ${tx.from} → ${tx.to}`, 'info'));
+                });
+
+                // Eksekusi setiap transaksi
+                for (let i = 0; i < transactions.length; i++) {
+                    // Cek saldo
+                    const ethBalance = await wallet.provider.getBalance(wallet.address);
+                    const usdcBalance = await usdcContract.balanceOf(wallet.address);
+                    const soneBalance = await soneContract.balanceOf(wallet.address);
+                    const soeBalance = await soeContract.balanceOf(wallet.address);
+                                
+                    console.log(formatLog(wallet, `\nTransaksi ${i + 1} dari 5`, 'info'));
+                    console.log(formatLog(wallet, `💰 Saldo Saat Ini:`, 'info'));
+                    console.log(formatLog(wallet, `⚡ ETH: ${ethers.formatEther(ethBalance)} ETH`, 'info'));
+                    console.log(formatLog(wallet, `💵 USDC.e: ${ethers.formatUnits(usdcBalance, 6)} USDC.e`, 'info'));
+                    console.log(formatLog(wallet, `🪙 SONE: ${ethers.formatEther(soneBalance)} SONE`, 'info'));
+                    console.log(formatLog(wallet, `⭐ SOE: ${ethers.formatEther(soeBalance)} SOE`, 'info'));
+
+                    const txDetail = transactions[i];
+                    const percentage = Math.floor(Math.random() * (5 - 1 + 1)) + 1; // 1-5%
+
+                    if (txDetail.from === 'ETH') {
+                        const amountIn = (ethBalance * BigInt(percentage)) / 100n;
+                        switch (txDetail.to) {
+                            case 'SONE':
+                                await swapETHtoToken(wallet, SONE_ADDRESS, amountIn);
+                                break;
+                            case 'SOE':
+                                await swapETHtoToken(wallet, SOE_ADDRESS, amountIn);
+                                break;
+                            case 'USDC':
+                                await swapETHtoToken(wallet, USDC_ADDRESS, amountIn);
+                                break;
+                        }
+                    } else {
+                        // Tangani swap token ke ETH
+                        switch (txDetail.from) {
+                            case 'SONE':
+                                if (soneBalance > 0n) {
+                                    await swapTokensForETH(wallet, SONE_ADDRESS, soneBalance);
+                                } else {
+                                    console.log(formatLog(wallet, `❌ Tidak ada saldo SONE, swap ETH ke SONE sebagai gantinya...`, 'warning'));
+                                    const amountIn = (ethBalance * BigInt(percentage)) / 100n;
+                                    await swapETHtoToken(wallet, SONE_ADDRESS, amountIn);
+                                }
+                                break;
+                            case 'SOE':
+                                if (soeBalance > 0n) {
+                                    await swapTokensForETH(wallet, SOE_ADDRESS, soeBalance);
+                                } else {
+                                    console.log(formatLog(wallet, `❌ Tidak ada saldo SOE, swap ETH ke SOE sebagai gantinya...`, 'warning'));
+                                    const amountIn = (ethBalance * BigInt(percentage)) / 100n;
+                                    await swapETHtoToken(wallet, SOE_ADDRESS, amountIn);
+                                }
+                                break;
+                            case 'USDC':
+                                if (usdcBalance > 0n) {
+                                    await swapTokensForETH(wallet, USDC_ADDRESS, usdcBalance, 6);
+                                } else {
+                                    console.log(formatLog(wallet, `❌ Tidak ada saldo USDC.e, swap ETH ke USDC.e sebagai gantinya...`, 'warning'));
+                                    const amountIn = (ethBalance * BigInt(percentage)) / 100n;
+                                    await swapETHtoToken(wallet, USDC_ADDRESS, amountIn);
+                                }
+                                break;
+                        }
+                    }
+
+                    // Delay acak antara transaksi (5-15 detik)
+                    if (i < transactions.length - 1) {
+                        await customDelay(wallet, '⏳ Menunggu sebelum transaksi berikutnya...');
+                    }
+                }
+
+                return true;
             } else if (action === "deploy") {
                 console.log(formatLog(wallet, `\n🎉 Starting deploy for Wallet ${index + 1}: ${wallet.address}`, 'info'));
                 // Implementasi logika deploy
@@ -999,8 +999,9 @@ try {
             // Tambahkan else if untuk aksi lain jika diperlukan
         } catch (error) {
             console.error(formatLog(wallet, `❌ Fatal error: ${error.message}`, 'error'));
-            return false;
+            throw error;
         }
+    }, wallet, 5, 15000);
     }
 
     async function processBridge(wallet, index, amount) {
@@ -1177,7 +1178,7 @@ try {
                         console.log(colors.cyan + `\nProcessing wallet ${i + 1} of ${wallets.length}` + colors.reset);
                         await processBridge(wallets[i], i, amount);
                         
-                        // Tambahkan delay antara setiap wallet kecuali untuk wallet terakhir
+                        // Tambahkan delay antar setiap wallet kecuali untuk wallet terakhir
                         if (i < wallets.length - 1) {
                             await bridgeDelay(wallets[i], 'Waiting before processing next wallet...');
                         }
@@ -1240,7 +1241,22 @@ try {
                 let action;
                 switch (choice) {
                     case "3":
-                        action = "swap";
+                        while (true) { // Infinite loop untuk cycle swap
+                            console.log(colors.cyan + "\n=== Memulai Cycle Swap Baru ===" + colors.reset);
+                            
+                            // Proses semua wallet
+                            for (let i = 0; i < wallets.length; i++) {
+                                await processWallet(wallets[i], "swap", i);
+                            }
+                            
+                            console.log(colors.green + "\n✅ Cycle selesai untuk semua wallet" + colors.reset);
+                            
+                            // Delay sebelum cycle berikutnya
+                            const cycleDelay = Helper.random(CYCLE_DELAY_RANGE.MIN, CYCLE_DELAY_RANGE.MAX);
+                            const minutes = Math.floor(cycleDelay / 60000);
+                            console.log(colors.yellow + `\n⏳ Menunggu ${minutes} menit sebelum memulai cycle baru...` + colors.reset);
+                            await new Promise(resolve => setTimeout(resolve, cycleDelay));
+                        }
                         break;
                     case "4":
                         action = "deploy";
@@ -1319,6 +1335,7 @@ try {
 }
 
 async function getTokenBalance(wallet, token) {
+    return await withRetry(async () => {
     try {
         const tokenContract = new ethers.Contract(
             token.ADDRESS,
@@ -1328,8 +1345,9 @@ async function getTokenBalance(wallet, token) {
         return await tokenContract.balanceOf(wallet.address);
     } catch (error) {
         console.error(`❌ Error getting ${token.SYMBOL} balance: ${error.message}`);
-        return 0n;
+        throw error;
     }
+    }, wallet, 3, 10000);
 }
 
 async function repayToken(wallet, token) {
