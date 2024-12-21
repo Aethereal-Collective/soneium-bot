@@ -56,5 +56,5 @@ screen -r soneium
    npm run nft
    ```
 
-### Trobleshoot
+## Troubleshoot
 insufficient GAS / insufficient Balance = You don't have enough ETH . Please bridge 0.05 Minimum with 0.1 ETH Sepolia (Minimum in your wallet)
