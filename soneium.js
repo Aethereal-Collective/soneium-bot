@@ -1,8 +1,34 @@
+// Tambahkan fungsi formatLog di bagian atas file, sebelum try-catch utama
+function formatLog(wallet, message, type = 'info') {
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const shortAddress = wallet.address.slice(-4);
+    let icon = '';
+    
+    switch(type) {
+        case 'success':
+            icon = '✅';
+            break;
+        case 'error':
+            icon = '❌';
+            break;
+        case 'warning':
+            icon = '⚠️';
+            break;
+        case 'wait':
+            icon = '⏳';
+            break;
+        default:
+            icon = 'ℹ️';
+    }
+    
+    return `[${timestamp}] [Account 1 | ${shortAddress}] ${icon} ${message}`;
+}
+
 // Tambahkan logging di awal script
 console.clear(); // Clear console
 console.log('\x1b[36m%s\x1b[0m', `
 ╔═══════════════════════════════════════╗
-║        Soneium Multi-Tool v1.4        ║
+║        Soneium Multi-Tool v1.5        ║
 ║         By: Aethereal Team            ║
 ╚═══════════════════════════════════════╝
 `);
@@ -521,57 +547,57 @@ try {
 
     // Faucet Functions
     async function claimFaucet(wallet, tokenType) {
-            let tokenConfig;
-            try {
-                switch(tokenType) {
-                    case "ASTR": tokenConfig = POOL_CONFIG.TOKENS.ASTR; break;
-                    case "USDC": tokenConfig = POOL_CONFIG.TOKENS.USDC; break;
-                    case "WBTC": tokenConfig = POOL_CONFIG.TOKENS.WBTC; break;
-                    case "SOLVBTC": tokenConfig = POOL_CONFIG.TOKENS.SOLVBTC; break;
-                    case "SOLVBTCBBN": tokenConfig = POOL_CONFIG.TOKENS.SOLVBTCBBN; break;
-                    case "VASTR": tokenConfig = POOL_CONFIG.TOKENS.VASTR; break;
-                    case "STONE": tokenConfig = POOL_CONFIG.TOKENS.STONE; break;
-                    default: throw new Error(`Token type ${tokenType} not found in config`);
+        let tokenConfig;
+        try {
+            switch(tokenType) {
+                case "ASTR": tokenConfig = POOL_CONFIG.TOKENS.ASTR; break;
+                case "USDC": tokenConfig = POOL_CONFIG.TOKENS.USDC; break;
+                case "WBTC": tokenConfig = POOL_CONFIG.TOKENS.WBTC; break;
+                case "SOLVBTC": tokenConfig = POOL_CONFIG.TOKENS.SOLVBTC; break;
+                case "SOLVBTCBBN": tokenConfig = POOL_CONFIG.TOKENS.SOLVBTCBBN; break;
+                case "VASTR": tokenConfig = POOL_CONFIG.TOKENS.VASTR; break;
+                case "STONE": tokenConfig = POOL_CONFIG.TOKENS.STONE; break;
+                default: throw new Error(`Token type ${tokenType} not found in config`);
+            }
+
+            return await withRetry(async () => {
+                console.log(formatLog(wallet, `🎉 Claiming ${tokenConfig.SYMBOL} faucet...`));
+                const iface = new ethers.Interface([
+                    "function drip(address token, address recipient) external returns (uint256)"
+                ]);
+
+                const data = iface.encodeFunctionData("drip", [
+                    tokenConfig.ADDRESS,
+                    wallet.address
+                ]);
+
+                const tx = {
+                    to: FAUCET_CONFIG.CONTRACT,
+                    data: data,
+                    gasLimit: "0x1e8480"
+                };
+
+                const transaction = await wallet.sendTransaction(tx);
+                console.log(formatLog(wallet, `✅ Transaction sent! Hash: ${NETWORKS.SONEIUM.EXPLORER}${transaction.hash}`, 'wait'));
+                
+                const receipt = await transaction.wait();
+                if (receipt.status === 1) {
+                    console.log(formatLog(wallet, `✅ Successfully claimed ${tokenConfig.SYMBOL} faucet!`, 'success'));
+                    return true;
                 }
+                return false;
+            }, wallet, 3, 5000);
 
-                return await withRetry(async () => {
-                    console.log(formatLog(wallet, `🎉 Claiming ${tokenConfig.SYMBOL} faucet...`));
-                    const iface = new ethers.Interface([
-                        "function drip(address token, address recipient) external returns (uint256)"
-                    ]);
-
-                    const data = iface.encodeFunctionData("drip", [
-                        tokenConfig.ADDRESS,
-                        wallet.address
-                    ]);
-
-                    const tx = {
-                        to: FAUCET_CONFIG.CONTRACT,
-                        data: data,
-                        gasLimit: "0x1e8480"
-                    };
-
-                    const transaction = await wallet.sendTransaction(tx);
-                    console.log(formatLog(wallet, `✅ Transaction sent! Hash: ${NETWORKS.SONEIUM.EXPLORER}${transaction.hash}`, 'wait'));
-                    
-                    const receipt = await transaction.wait();
-                    if (receipt.status === 1) {
-                        console.log(formatLog(wallet, `✅ Successfully claimed ${tokenConfig.SYMBOL} faucet!`, 'success'));
-                        return true;
-                    }
-                    return false;
-                }, wallet, 3, 5000);
-
-            } catch (error) {
-                if (error.message.includes("execution reverted") || 
-                    error.message.includes("cooldown") || 
-                    error.message.toLowerCase().includes("already claimed")) {
-                    console.log(formatLog(wallet, `❌ Skipping ${tokenConfig?.SYMBOL || tokenType} faucet: Still in cooldown period`, 'warning'));
-                    return false;
-                }
-                console.error(formatLog(wallet, `❌ Error claiming ${tokenConfig?.SYMBOL || tokenType} faucet: ${error.message}`, 'error'));
+        } catch (error) {
+            if (error.message.includes("execution reverted") || 
+                error.message.includes("cooldown") || 
+                error.message.toLowerCase().includes("already claimed")) {
+                console.log(formatLog(wallet, `❌ Skipping ${tokenConfig?.SYMBOL || tokenType} faucet: Still in cooldown period`, 'warning'));
                 return false;
             }
+            console.error(formatLog(wallet, `❌ Error claiming ${tokenConfig?.SYMBOL || tokenType} faucet: ${error.message}`, 'error'));
+            return false;
+        }
     }
 
     // Tambahkan fungsi approve token
@@ -580,8 +606,8 @@ try {
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 [
-                    "function approve(address spender, uint256 amount) external returns (bool)",
-                    "function allowance(address owner, address spender) view returns (uint256)"
+                    "function allowance(address owner, address spender) view returns (uint256)",
+                    "function approve(address spender, uint256 amount) returns (bool)"
                 ],
                 wallet
             );
@@ -678,41 +704,116 @@ try {
     // Fungsi untuk borrow token
     async function borrowToken(wallet, token) {
         try {
-            return await withRetry(async () => {
-                const balance = await getTokenBalance(wallet, token);
-                if (balance <= 0n) {
-                    console.log(formatLog(wallet, `❌ Skipping ${token.SYMBOL}: No balance to borrow against`, 'warning'));
-                    return false; // Return false instead of throwing error
-                }
+            // Skip untuk USDC.e dan WBTC
+            if (token.SYMBOL === "USDC.e" || token.SYMBOL === "WBTC") {
+                console.log(formatLog(wallet, `⏭️ Skipping borrow for ${token.SYMBOL} token...`, 'info'));
+                return true;
+            }
 
-                const percentage = Math.floor(Math.random() * (5 - 2 + 1)) + 2;
-                const borrowAmount = (balance * BigInt(percentage)) / 100n;
+            console.log(formatLog(wallet, `🔄 Memulai proses peminjaman ${token.SYMBOL}...`, 'info'));
 
-                console.log(formatLog(wallet, `🎉 Current ${token.SYMBOL} balance: ${ethers.formatUnits(balance, token.DECIMALS)}`, 'info'));
-                console.log(formatLog(wallet, `🎉 Will borrow ${ethers.formatUnits(borrowAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)`, 'info'));
+            // Setup contract interface untuk cek data user (selalu gunakan L2POOL)
+            const dataContract = new ethers.Contract(
+                POOL_CONFIG.L2POOL,
+                ["function getUserAccountData(address user) external view returns (uint256 totalCollateralETH, uint256 totalDebtETH, uint256 availableBorrowsETH, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)"],
+                wallet
+            );
 
+            // Setup contract interface untuk borrow
                 const poolContract = new ethers.Contract(
                     POOL_CONFIG.L2POOL,
-                    ["function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf) external"],
+                [
+                    "function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf) external"
+                ],
                     wallet
                 );
 
-                const tx = await poolContract.borrow(
+            try {
+                // Cek data akun user sebelum meminjam menggunakan dataContract
+                const accountData = await dataContract.getUserAccountData(wallet.address);
+                console.log(formatLog(wallet, `💰 Total Collateral: ${ethers.formatEther(accountData[0])} ETH`, 'info'));
+                console.log(formatLog(wallet, `📊 Total Debt: ${ethers.formatEther(accountData[1])} ETH`, 'info'));
+                console.log(formatLog(wallet, `📈 Available to Borrow: ${ethers.formatEther(accountData[2])} ETH`, 'info'));
+                console.log(formatLog(wallet, `🏦 Health Factor: ${ethers.formatEther(accountData[5])}`, 'info'));
+
+                if (accountData[2] <= 0n) {
+                    console.log(formatLog(wallet, `❌ Tidak ada collateral yang cukup untuk Borrow ${token.SYMBOL}`, 'error'));
+                    return false;
+                }
+
+                // Get provider
+                const provider = new ethers.JsonRpcProvider(NETWORKS.SONEIUM.RPC);
+                
+                // Get gas price dengan getFeeData
+                const feeData = await provider.getFeeData();
+                const gasPrice = feeData.gasPrice;
+
+                console.log(formatLog(wallet, `⛽ Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`, 'info'));
+
+                // Generate random percentage antara 5-10%
+                const percentage = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
+                const borrowAmount = (accountData[2] * BigInt(percentage)) / 100n;
+
+                // Approve token jika diperlukan
+                await approveToken(wallet, token.ADDRESS, token.SYMBOL === "WBTC" ? "0xc1d3a8f2c1270680818802369cb4d1a7744b2866" : POOL_CONFIG.L2POOL);
+
+                console.log(formatLog(wallet, `🚀 Mengirim transaksi borrow...`, 'wait'));
+
+                // Panggil fungsi sesuai dengan token
+                const tx = token.SYMBOL === "WBTC" ?
+                    await poolContract["1e6473f9"](
+                        52n, // param1 (0x34)
+                        54n, // param2 (0x36)
+                        55n, // param3 (0x37)
+                        "0xccc32509d95beb7924632d3b36251e8e34b85e7ddf1460abc68078edb24cec00", // param4
+                        token.ADDRESS, // param5
+                        wallet.address, // param6
+                        wallet.address, // param7
+                        borrowAmount, // param8
+                        2n, // param9
+                        0n, // param10
+                        {
+                            gasLimit: 1000000,
+                            gasPrice: gasPrice
+                        }
+                    ) :
+                    await poolContract.borrow(
                     token.ADDRESS,
                     borrowAmount,
-                    2,
-                    0,
-                    wallet.address
-                );
+                        2, // Variable rate mode
+                        0, // Referral code
+                        wallet.address, // onBehalfOf
+                        {
+                            gasLimit: 1000000,
+                            gasPrice: gasPrice
+                        }
+                    );
 
-                console.log(formatLog(wallet, `✅ Transaction Hash: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`, 'info'));
-                await tx.wait();
-                console.log(formatLog(wallet, `🎉 Successfully borrowed ${token.SYMBOL}!`, 'success'));
+                console.log(formatLog(wallet, `🔄 Menunggu konfirmasi: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`, 'wait'));
+                const receipt = await tx.wait();
+
+                if (receipt.status === 1) {
+                    console.log(formatLog(wallet, `✅ Berhasil Borrow ${ethers.formatUnits(borrowAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)!`, 'success'));
                 return true;
-            }, wallet);
+                } else {
+                    throw new Error(`Transaction failed: ${receipt.transactionHash}`);
+                }
+
         } catch (error) {
-            console.log(formatLog(wallet, `❌ Error borrowing ${token.SYMBOL}: ${error.message}`, 'error'));
-            return false; // Return false instead of throwing error
+                if (error.message.includes("insufficient collateral")) {
+                    console.log(formatLog(wallet, `❌ Collateral tidak mencukupi untuk Borrow ${token.SYMBOL}`, 'error'));
+                } else if (error.message.includes("borrowing not enabled")) {
+                    console.log(formatLog(wallet, `❌ Borrowing ${token.SYMBOL} tidak diaktifkan`, 'error'));
+                } else if (error.message.includes("out of gas")) {
+                    console.log(formatLog(wallet, `❌ Error: Out of gas - Coba tingkatkan gas limit`, 'error'));
+                } else {
+                    console.log(formatLog(wallet, `❌ Error saat Borrow ${token.SYMBOL}: ${error.message}`, 'error'));
+                }
+                return false;
+            }
+        } catch (error) {
+            console.log(formatLog(wallet, `❌ Error saat Borrow ${token.SYMBOL}: ${error.message}`, 'error'));
+            return false;
         }
     }
 
@@ -870,7 +971,7 @@ try {
         return await withRetry(async () => {
             try {
                 if (action === "swap") {
-                    console.log(formatLog(wallet, `\n🎉 Memulai swap untuk Wallet ${index + 1}: ${wallet.address}`, 'info'));
+                    console.log(formatLog(wallet, `\n Memulai swap untuk Wallet ${index + 1}: ${wallet.address}`, 'info'));
 
                 // Tambahkan delay awal
                 await customDelay(wallet, '⏳ Menunggu sebelum memulai proses swap...');
@@ -990,7 +1091,7 @@ try {
 
                 return true;
             } else if (action === "deploy") {
-                console.log(formatLog(wallet, `\n🎉 Starting deploy for Wallet ${index + 1}: ${wallet.address}`, 'info'));
+                console.log(formatLog(wallet, `\n Starting deploy for Wallet ${index + 1}: ${wallet.address}`, 'info'));
                 // Implementasi logika deploy
             } else if (action === "balance") {
                 console.log(formatLog(wallet, `\n🎉 Checking balance for Wallet ${index + 1}: ${wallet.address}`, 'info'));
@@ -1006,7 +1107,7 @@ try {
 
     async function processBridge(wallet, index, amount) {
         try {
-            console.log(formatLog(wallet, `\n🎉 Starting bridge for Wallet ${index + 1}: ${wallet.address}`, 'info'));
+            console.log(formatLog(wallet, `\n🚀 Starting bridge for Wallet ${index + 1}: ${wallet.address}`, 'info'));
             
             // Setup Sepolia provider
             const sepoliaProvider = new ethers.JsonRpcProvider(
@@ -1028,59 +1129,65 @@ try {
     // Fungsi Sake Finance
     async function processSakeFinance(wallet, action) {
         try {
-            await customDelay(wallet, '⏳ Waiting before starting Sake Finance action...');
-            
             console.log(formatLog(wallet, `\n🎉 Starting Sake Finance ${action}...`, 'info'));
             
-            switch(action) {
-                case "claim":
-                    for (const tokenType of ["ASTR", "USDC", "WBTC", "SOLVBTC", "SOLVBTCBBN", "VASTR", "STONE"]) {
-                        await claimFaucet(wallet, tokenType).catch(error => {
-                            console.log(formatLog(wallet, `❌ Failed to claim ${tokenType}: ${error.message}`, 'warning'));
-                        });
-                        await customDelay(wallet, '⏳ Waiting before next token claim...');
-                    }
-                    break;
-                    
-                case "supply":
-                case "withdraw":
-                    for (const token of Object.values(POOL_CONFIG.TOKENS)) {
-                        const actionFn = {
-                            'supply': supplyToken,
-                            'withdraw': withdrawToken
-                        }[action];
-                        
-                        await actionFn(wallet, token).catch(error => {
-                            console.log(formatLog(wallet, `❌ Failed to ${action} ${token.SYMBOL}: ${error.message}`, 'warning'));
-                        });
-                        await customDelay(wallet, `⏳ Waiting before next token ${action}...`);
-                    }
-                    break;
+            // Get tokens from config
+            const tokens = Object.values(POOL_CONFIG.TOKENS);
 
-                case "borrow":
-                case "repay":
-                    for (const token of Object.values(POOL_CONFIG.TOKENS)) {
-                        if (token.SYMBOL === 'USDC' || token.ADDRESS.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
-                            console.log(formatLog(wallet, `ℹ️ Skipping ${action} for USDC.e token DEV TERLALU MALAS MEMBUAT CONTRACT, MENDING JOIN DISCORD https://discord.gg/aethereal`, 'info'));
-                            continue;
-                        }
-                        
-                        const actionFn = {
-                            'borrow': borrowToken,
-                            'repay': repayToken
-                        }[action];
-                        
-                        await actionFn(wallet, token).catch(error => {
-                            console.log(formatLog(wallet, `❌ Failed to ${action} ${token.SYMBOL}: ${error.message}`, 'warning'));
-                        });
-                        await customDelay(wallet, `⏳ Waiting before next token ${action}...`);
+            // Filter out USDC.e token
+            const filteredTokens = tokens.filter(token => token.SYMBOL !== "USDC.e");
+
+            switch (action) {
+                case 'claim':
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token claim...');
+                        await claimToken(wallet, token);
+                    }
+                    break;
+                case 'supply':
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token supply...');
+                        await supplyToken(wallet, token);
+                    }
+                    break;
+                case 'borrow':
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token borrow...');
+                        await borrowToken(wallet, token);
+                    }
+                    break;
+                case 'repay':
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token repay...');
+                        await repayToken(wallet, token);
+                    }
+                    break;
+                case 'withdraw':
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token withdraw...');
+                        await withdrawToken(wallet, token);
+                    }
+                    break;
+                case 'all':
+                    // Claim
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token claim...');
+                        await claimToken(wallet, token);
+                    }
+                    // Supply
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token supply...');
+                        await supplyToken(wallet, token);
+                    }
+                    // Borrow
+                    for (const token of filteredTokens) {
+                        await customDelay(wallet, '⏳ Waiting before next token borrow...');
+                        await borrowToken(wallet, token);
                     }
                     break;
             }
-            return true;
         } catch (error) {
-            console.log(formatLog(wallet, `❌ Error in Sake Finance ${action}: ${error.message}`, 'error'));
-            return false;
+            console.log(formatLog(wallet, `❌ Error in Sake Finance: ${error.message}`, 'error'));
         }
     }
 
@@ -1150,7 +1257,7 @@ try {
                 console.log(colors.yellow + "2. 🏦 Sake Finance" + colors.reset);
                 console.log(colors.yellow + "3. 💱 Swap Tokens" + colors.reset);
                 console.log(colors.yellow + "4. 📝 Deploy Token Contract" + colors.reset);
-                console.log(colors.yellow + "5. 🚪 Exit" + colors.reset);
+                console.log(colors.yellow + "5. Exit" + colors.reset);
 
                 const choice = await input.text("\nSelect option (1-5): ");
 
@@ -1249,7 +1356,7 @@ try {
                                 await processWallet(wallets[i], "swap", i);
                             }
                             
-                            console.log(colors.green + "\n✅ Cycle selesai untuk semua wallet" + colors.reset);
+                            console.log(colors.green + "\n Cycle selesai untuk semua wallet" + colors.reset);
                             
                             // Delay sebelum cycle berikutnya
                             const cycleDelay = Helper.random(CYCLE_DELAY_RANGE.MIN, CYCLE_DELAY_RANGE.MAX);
@@ -1294,7 +1401,7 @@ try {
                                 
                                 // Delay antar wallet
                                 if (i < wallets.length - 1) {
-                                    await customDelay(wallets[i], '⏳ Waiting before next deployment...');
+                                    await customDelay(wallets[i], 'Waiting before next deployment...');
                                 }
                             } catch (error) {
                                 console.error(formatLog(wallets[i], `❌ Deployment Failed: ${error.message}`, 'error'));
@@ -1352,60 +1459,113 @@ async function getTokenBalance(wallet, token) {
 
 async function repayToken(wallet, token) {
     try {
-        const balance = await getTokenBalance(wallet, token);
+        console.log(formatLog(wallet, `🔄 Memulai proses repay untuk ${token.SYMBOL}...`, 'info'));
+
+        // Check token balance
+        const tokenContract = new ethers.Contract(
+            token.ADDRESS,
+            [
+                "function balanceOf(address) view returns (uint256)",
+                "function transfer(address to, uint256 amount) external returns (bool)",
+                "function approve(address spender, uint256 amount) external returns (bool)",
+                "function allowance(address owner, address spender) view returns (uint256)"
+            ],
+            wallet
+        );
+        const balance = await tokenContract.balanceOf(wallet.address);
+        
         if (balance <= 0n) {
-            console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] No ${token.SYMBOL} balance to repay`);
+            console.log(formatLog(wallet, `❌ Skipping ${token.SYMBOL}: No balance to repay`, 'warning'));
             return false;
         }
 
-        // Random percentage between 1-3%
-        const percentage = Math.floor(Math.random() * (3 - 1 + 1)) + 1;
+        // Random percentage between 5-10%
+        const percentage = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
         const repayAmount = (balance * BigInt(percentage)) / 100n;
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Current ${token.SYMBOL} balance: ${ethers.formatUnits(balance, token.DECIMALS)}`);
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Will repay ${ethers.formatUnits(repayAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)`);
+        console.log(formatLog(wallet, `💰 Current ${token.SYMBOL} balance: ${ethers.formatUnits(balance, token.DECIMALS)}`, 'info'));
 
-        // Approve token if needed
-        const tokenContract = new ethers.Contract(
-            token.ADDRESS,
-            ["function approve(address spender, uint256 amount) returns (bool)"],
-            wallet
-        );
+        // Get provider
+        const provider = new ethers.JsonRpcProvider(NETWORKS.SONEIUM.RPC);
+        
+        // Get gas price
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.gasPrice;
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Approving token...`);
-        const approveTx = await tokenContract.approve(POOL_CONFIG.L2POOL, ethers.MaxUint256);
-        await approveTx.wait();
+        // Check allowance first
+        const spenderAddress = "0xec38a5cd88e87fec0d10822de8a3d6db144931da";
+        const currentAllowance = await tokenContract.allowance(wallet.address, spenderAddress);
 
-        const poolContract = new ethers.Contract(
-            POOL_CONFIG.L2POOL,
-            ["function repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf) external returns (uint256)"],
-            wallet
-        );
+        if (currentAllowance < repayAmount) {
+            console.log(formatLog(wallet, `🔄 Approving token...`, 'info'));
+            const approveTx = await tokenContract.approve(
+                spenderAddress,
+                ethers.MaxUint256, // Approve for maximum amount to avoid future approvals
+                {
+                    gasLimit: 100000,
+                    gasPrice: gasPrice
+                }
+            );
+            console.log(formatLog(wallet, `🔄 Menunggu konfirmasi approve: ${NETWORKS.SONEIUM.EXPLORER}${approveTx.hash}`, 'wait'));
+            await approveTx.wait();
+        } else {
+            console.log(formatLog(wallet, `✅ Token already approved with sufficient allowance`, 'info'));
+        }
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Repaying to pool...`);
-        const tx = await poolContract.repay(
-            token.ADDRESS,
-            repayAmount,
-            2,
-            wallet.address,
-            { gasLimit: 0x11e460 }
-        );
+        console.log(formatLog(wallet, `⛽ Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`, 'info'));
+        console.log(formatLog(wallet, `📝 Mengirim transaksi repay...`, 'wait'));
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Transaction Hash: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`);
-        await tx.wait();
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Successfully repaid ${token.SYMBOL}!`);
+        // Encode function data manually
+        const abiCoder = new ethers.AbiCoder();
+        const data = "0x573ade81" + 
+            abiCoder.encode(
+                ["address", "uint256", "uint256", "address"],
+                [token.ADDRESS, repayAmount, 2n, wallet.address]
+            ).slice(2);
+
+        // Execute repay dengan parameter yang benar
+        const tx = await wallet.sendTransaction({
+            to: spenderAddress,
+            data: data,
+            gasLimit: 300000,
+            gasPrice: gasPrice
+        });
+
+        console.log(formatLog(wallet, `🔄 Menunggu konfirmasi: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`, 'wait'));
+        const receipt = await tx.wait();
+
+        if (receipt.status === 1) {
+            console.log(formatLog(wallet, `✅ Berhasil repay ${ethers.formatUnits(repayAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)!`, 'success'));
         return true;
+        } else {
+            throw new Error(`Transaction failed: ${receipt.transactionHash}`);
+        }
+
     } catch (error) {
-        console.error(`❌ Error repaying ${token.SYMBOL}: ${error.message}`);
+        console.log(formatLog(wallet, `❌ Error repaying ${token.SYMBOL}: ${error.message}`, 'error'));
         return false;
     }
 }
 
 async function withdrawToken(wallet, token) {
     try {
-        const balance = await getTokenBalance(wallet, token);
+        console.log(formatLog(wallet, `🔄 Memulai proses withdraw untuk ${token.SYMBOL}...`, 'info'));
+
+        // Check token balance
+        const tokenContract = new ethers.Contract(
+            token.ADDRESS,
+            [
+                "function balanceOf(address) view returns (uint256)",
+                "function transfer(address to, uint256 amount) external returns (bool)",
+                "function approve(address spender, uint256 amount) external returns (bool)",
+                "function allowance(address owner, address spender) view returns (uint256)"
+            ],
+            wallet
+        );
+        const balance = await tokenContract.balanceOf(wallet.address);
+        
         if (balance <= 0n) {
-            console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] No ${token.SYMBOL} balance to withdraw`);
+            console.log(formatLog(wallet, `❌ Skipping ${token.SYMBOL}: No balance to withdraw`, 'warning'));
             return false;
         }
 
@@ -1413,29 +1573,46 @@ async function withdrawToken(wallet, token) {
         const percentage = Math.floor(Math.random() * (60 - 40 + 1)) + 40;
         const withdrawAmount = (balance * BigInt(percentage)) / 100n;
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Current ${token.SYMBOL} balance: ${ethers.formatUnits(balance, token.DECIMALS)}`);
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Will withdraw ${ethers.formatUnits(withdrawAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)`);
+        console.log(formatLog(wallet, `💰 Current ${token.SYMBOL} balance: ${ethers.formatUnits(balance, token.DECIMALS)}`, 'info'));
 
-        const poolContract = new ethers.Contract(
-            POOL_CONFIG.L2POOL,
-            ["function withdraw(address asset, uint256 amount, address to) external returns (uint256)"],
-            wallet
-        );
+        // Get provider
+        const provider = new ethers.JsonRpcProvider(NETWORKS.SONEIUM.RPC);
+        
+        // Get gas price
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.gasPrice;
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Withdrawing from pool...`);
-        const tx = await poolContract.withdraw(
-            token.ADDRESS,
-            withdrawAmount,
-            wallet.address,
-            { gasLimit: 0x11e460 }
-        );
+        console.log(formatLog(wallet, `⛽ Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`, 'info'));
+        console.log(formatLog(wallet, `📝 Mengirim transaksi withdraw...`, 'wait'));
 
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Transaction Hash: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`);
-        await tx.wait();
-        console.log(`[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [Account 1 | ${wallet.address.slice(-4)}] Successfully withdrawn ${token.SYMBOL}!`);
-        return true;
+        // Encode function data manually
+        const abiCoder = new ethers.AbiCoder();
+        const data = "0x69328dec" + 
+            abiCoder.encode(
+                ["address", "uint256", "address"],
+                [token.ADDRESS, withdrawAmount, wallet.address]
+            ).slice(2);
+
+        // Execute withdraw dengan parameter yang benar
+        const tx = await wallet.sendTransaction({
+            to: "0xec38a5cd88e87fec0d10822de8a3d6db144931da",
+            data: data,
+            gasLimit: 1000000,
+            gasPrice: gasPrice
+        });
+
+        console.log(formatLog(wallet, `🔄 Menunggu konfirmasi: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`, 'wait'));
+        const receipt = await tx.wait();
+
+        if (receipt.status === 1) {
+            console.log(formatLog(wallet, `✅ Berhasil withdraw ${ethers.formatUnits(withdrawAmount, token.DECIMALS)} ${token.SYMBOL} (${percentage}%)!`, 'success'));
+            return true;
+        } else {
+            throw new Error(`Transaction failed: ${receipt.transactionHash}`);
+        }
+
     } catch (error) {
-        console.error(`❌ Error withdrawing ${token.SYMBOL}: ${error.message}`);
+        console.log(formatLog(wallet, `❌ Error withdrawing ${token.SYMBOL}: ${error.message}`, 'error'));
         return false;
     }
 }
@@ -1492,5 +1669,57 @@ async function compileContract(wallet) {
     } catch (error) {
         console.error(`❌ Compilation failed: ${error.message}`);
         throw error;
+    }
+}
+
+async function claimToken(wallet, token) {
+    try {
+        console.log(formatLog(wallet, `🔄 Memulai proses claim untuk ${token.SYMBOL}...`, 'info'));
+
+        // Get provider
+        const provider = new ethers.JsonRpcProvider(NETWORKS.SONEIUM.RPC);
+        
+        // Get gas price
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.gasPrice;
+
+        console.log(formatLog(wallet, `⛽ Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} Gwei`, 'info'));
+        console.log(formatLog(wallet, `📝 Mengirim transaksi claim...`, 'wait'));
+
+        // Encode function data manually untuk drip
+        const abiCoder = new ethers.AbiCoder();
+        const data = "0xeb3839a7" + 
+            abiCoder.encode(
+                ["address", "address"],
+                [token.ADDRESS, wallet.address]
+            ).slice(2);
+
+        // Execute drip dengan parameter yang benar
+        const tx = await wallet.sendTransaction({
+            to: "0x3c1545304c6540bd483d6178ff13030bbc9aaf6a", // Faucet contract address
+            data: data,
+            gasLimit: 300000,
+            gasPrice: gasPrice
+        });
+
+        console.log(formatLog(wallet, `🔄 Menunggu konfirmasi: ${NETWORKS.SONEIUM.EXPLORER}${tx.hash}`, 'wait'));
+        const receipt = await tx.wait();
+
+        if (receipt.status === 1) {
+            console.log(formatLog(wallet, `✅ Berhasil claim ${token.SYMBOL}!`, 'success'));
+            return true;
+        } else {
+            throw new Error(`Transaction failed: ${receipt.transactionHash}`);
+        }
+
+    } catch (error) {
+        if (error.message.includes("execution reverted") || 
+            error.message.includes("cooldown") || 
+            error.message.toLowerCase().includes("already claimed")) {
+            console.log(formatLog(wallet, `❌ Skipping ${token.SYMBOL} faucet: Still in cooldown period`, 'warning'));
+            return false;
+        }
+        console.log(formatLog(wallet, `❌ Error claiming ${token.SYMBOL}: ${error.message}`, 'error'));
+        return false;
     }
 }
